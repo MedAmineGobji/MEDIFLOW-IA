@@ -1,0 +1,604 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useAuth } from '../../lib/useAuth';
+import { Upload, FileText, Brain, CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react';
+import Link from 'next/link';
+
+interface JobOffer {
+  id: number;
+  title: string;
+  department: string;
+  description: string;
+  requirements: string;
+}
+
+interface AnalysisResult {
+  recommandation: string;
+  score: number;
+  aiPowered?: boolean;
+  formation: string;
+  experience: string;
+  requirementsAnalysis?: {
+    matchedRequirements: string[];
+    missingRequirements: string[];
+    totalRequirements: number;
+    score: number;
+  };
+  competences: string[];
+  pointsForts: string[];
+  lacunes: string[];
+  questionsEntretien: string[];
+  metadata?: {
+    fileName: string;
+    fileSize: number;
+    fileExtension: string;
+  };
+  niveauConfiance: string;
+}
+
+export default function CVAnalysisPage() {
+  const { user, loading: authLoading } = useAuth();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedJobOfferId, setSelectedJobOfferId] = useState<string>('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [jobOffers, setJobOffers] = useState<JobOffer[]>([]);
+  const [savedAnalyses, setSavedAnalyses] = useState<any[]>([]);
+
+  // Charger les offres d'emploi au montage du composant
+  useEffect(() => {
+    const fetchJobOffers = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/job-offers', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setJobOffers(data);
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement des offres:', error);
+      }
+    };
+
+    if (user) {
+      fetchJobOffers();
+    }
+  }, [user]);
+
+  // Charger les analyses sauvegardées
+  const loadSavedAnalyses = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch('http://localhost:5000/api/cv-analysis/analyses', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        // Filtrer seulement les analyses sans applicationId (analyses indépendantes)
+        const independentAnalyses = result.data?.filter((analysis: any) => analysis.applicationId === null) || [];
+        setSavedAnalyses(independentAnalyses);
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement des analyses sauvegardées:', error);
+    }
+  };
+
+  // Charger les analyses au montage
+  useEffect(() => {
+    if (user) {
+      loadSavedAnalyses();
+    }
+  }, [user]);
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Vérifier le type de fichier
+      const allowedTypes = ['application/pdf', 'text/plain'];
+      if (!allowedTypes.includes(file.type)) {
+        setError('Type de fichier non supporté. Utilisez PDF ou TXT.');
+        return;
+      }
+
+      // Vérifier la taille (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setError('Fichier trop volumineux. Maximum 10MB.');
+        return;
+      }
+
+      setSelectedFile(file);
+      setError(null);
+      setResult(null);
+    }
+  };
+
+  const handleAnalysis = async () => {
+    if (!selectedFile) return;
+
+    setAnalyzing(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('cv', selectedFile);
+      if (selectedJobOfferId) {
+        formData.append('jobOfferId', selectedJobOfferId);
+      }
+
+      const response = await fetch('http://localhost:5000/api/cv-analysis/analyze', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Erreur lors de l\'analyse du CV');
+      }
+
+      const data = await response.json();
+      console.log('Analysis result:', data);
+      console.log('Metadata in result:', data.data?.metadata);
+
+      if (data.success && data.data) {
+        setResult({
+          ...data.data,
+          aiPowered: true,
+          metadata: {
+            fileName: data.data.metadata?.fileName || selectedFile.name,
+            fileSize: data.data.metadata?.fileSize || selectedFile.size,
+            fileExtension: data.data.metadata?.fileExtension || selectedFile.name.split('.').pop() || ''
+          }
+        });
+        // Recharger les analyses sauvegardées
+        await loadSavedAnalyses();
+      } else {
+        throw new Error(data.message || 'Erreur lors de l\'analyse');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Une erreur est survenue');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const getRecommendationColor = (recommandation: string) => {
+    switch (recommandation) {
+      case 'RECOMMANDÉ': return 'text-green-600 bg-green-50 border-green-200';
+      case 'À CONSIDÉRER': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+      case 'NON RECOMMANDÉ': return 'text-red-600 bg-red-50 border-red-200';
+      default: return 'text-gray-600 bg-gray-50 border-gray-200';
+    }
+  };
+
+  const getRecommendationIcon = (recommandation: string) => {
+    switch (recommandation) {
+      case 'RECOMMANDÉ': return <CheckCircle className="w-5 h-5 text-green-600" />;
+      case 'À CONSIDÉRER': return <AlertCircle className="w-5 h-5 text-yellow-600" />;
+      case 'NON RECOMMANDÉ': return <XCircle className="w-5 h-5 text-red-600" />;
+      default: return <FileText className="w-5 h-5 text-gray-600" />;
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+      </div>
+    );
+  }
+
+  if (!user || !['hrRecruiter', 'admin'].includes(user.role)) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-white mb-4">Accès refusé</h1>
+          <p className="text-gray-300">Vous n'avez pas les permissions pour accéder à cette page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      <header className="backdrop-blur-md bg-white/10 border-b border-white/20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-gradient-to-br from-purple-400 to-pink-500 p-2 rounded-xl">
+              <Brain className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+                Analyse IA des CV
+              </h1>
+              <p className="text-xs text-gray-300">Évaluation intelligente des candidats médicaux</p>
+            </div>
+          </div>
+
+          <Link
+            href="/hr-dashboard"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-white/20 text-sm text-gray-200 hover:bg-white/10 transition-all"
+          >
+            Retour au tableau de bord RH
+          </Link>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Section Upload */}
+          <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6">
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Upload className="w-5 h-5" />
+              Upload du CV
+            </h2>
+
+            <div className="space-y-4">
+              <div className="border-2 border-dashed border-white/30 rounded-xl p-8 text-center hover:border-white/50 transition-colors">
+                <input
+                  type="file"
+                  accept=".pdf,.txt"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="cv-upload"
+                />
+                <label htmlFor="cv-upload" className="cursor-pointer">
+                  <FileText className="w-12 h-12 text-white/60 mx-auto mb-4" />
+                  <p className="text-white/80 mb-2">
+                    {selectedFile ? selectedFile.name : 'Cliquez pour sélectionner un CV'}
+                  </p>
+                  <p className="text-white/60 text-sm">
+                    PDF ou TXT (max 10MB)
+                  </p>
+                </label>
+              </div>
+
+              {selectedFile && (
+                <div className="bg-white/5 rounded-xl p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white font-medium">{selectedFile.name}</p>
+                      <p className="text-white/60 text-sm">
+                        {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleAnalysis}
+                      disabled={analyzing}
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-2 rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {analyzing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Analyse en cours...
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="w-4 h-4" />
+                          {selectedJobOfferId ? 'Analyser avec IA (personnalisé)' : 'Analyser avec IA'}
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Sélection de l'offre d'emploi - RECOMMANDÉ */}
+              {selectedFile && jobOffers.length > 0 && (
+                <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-400/40 rounded-xl p-4">
+                  <label className="block text-white font-medium mb-2 flex items-center gap-2">
+                    <Brain className="w-4 h-4" />
+                    Offre d'emploi (recommandé pour analyse personnalisée)
+                  </label>
+                  <select
+                    value={selectedJobOfferId}
+                    onChange={(e) => setSelectedJobOfferId(e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Analyse générale (sans offre spécifique)</option>
+                    {jobOffers.map((offer) => (
+                      <option key={offer.id} value={offer.id.toString()}>
+                        {offer.title} - {offer.department}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-blue-200 text-xs mt-1">
+                    💡 Sélectionnez une offre pour une analyse IA personnalisée selon les exigences du poste
+                  </p>
+                  {selectedJobOfferId && (
+                    <p className="text-green-200 text-xs mt-1">
+                      ✅ Analyse personnalisée activée pour ce poste
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-500/20 border border-red-400/40 rounded-xl p-4">
+                  <p className="text-red-200 text-sm">{error}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Section Résultats */}
+          <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6">
+            <h2 className="text-lg font-semibold text-white mb-4">Résultats de l'Analyse</h2>
+
+            {!result && !analyzing && (
+              <div className="text-center py-12">
+                <Brain className="w-16 h-16 text-white/30 mx-auto mb-4" />
+                <p className="text-white/60">
+                  Upload un CV et lancez l'analyse pour voir les résultats
+                </p>
+              </div>
+            )}
+
+            {analyzing && (
+              <div className="text-center py-12">
+                <Loader2 className="w-12 h-12 animate-spin text-purple-400 mx-auto mb-4" />
+                <p className="text-white">Analyse IA en cours...</p>
+                <p className="text-white/60 text-sm mt-2">
+                  Extraction du texte et évaluation du profil
+                </p>
+              </div>
+            )}
+
+            {result && result.score !== undefined && result.recommandation && (
+              <>
+                {/* DEBUG: Indicateur temporaire */}
+                <div className="bg-red-500 text-white p-4 rounded mb-4">
+                  DEBUG: Résultats reçus - Score: {result.score} | Recommandation: {result.recommandation}
+                </div>
+                <div className="space-y-6">
+                  {/* Score et Recommandation */}
+                <div className="text-center">
+                  <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border ${getRecommendationColor(result.recommandation)}`}>
+                    {getRecommendationIcon(result.recommandation)}
+                    <span className="font-semibold">{result.recommandation}</span>
+                  </div>
+                  <div className="mt-4">
+                    <div className="text-4xl font-bold text-white mb-2">{result.score}/100</div>
+                    <div className="w-full bg-white/20 rounded-full h-3">
+                      <div
+                        className="bg-gradient-to-r from-purple-500 to-pink-500 h-3 rounded-full transition-all duration-1000"
+                        style={{ width: `${result.score}%` }}
+                      ></div>
+                    </div>
+                    {/* Indicateur IA */}
+                    {result.aiPowered && (
+                      <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-full border border-blue-400/30">
+                        <Brain className="w-3 h-3 text-blue-400" />
+                        <span className="text-xs text-blue-300 font-medium">Analyse IA</span>
+                      </div>
+                    )}
+                    {result.aiPowered === false && (
+                      <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-gray-500/20 to-gray-600/20 rounded-full border border-gray-400/30">
+                        <FileText className="w-3 h-3 text-gray-400" />
+                        <span className="text-xs text-gray-300 font-medium">Analyse par règles</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Informations principales */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Formation</h3>
+                    <p className="text-white/80 text-sm">{result.formation}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Expérience</h3>
+                    <p className="text-white/80 text-sm">{result.experience}</p>
+                  </div>
+                </div>
+
+                {/* Adéquation au poste */}
+                {result.requirementsAnalysis && (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-3 flex items-center gap-2">
+                      <CheckCircle className="w-5 h-5 text-green-400" />
+                      Adéquation au poste
+                    </h3>
+
+                    <div className="space-y-3">
+                      {/* Exigences satisfaites */}
+                      {result.requirementsAnalysis.matchedRequirements && result.requirementsAnalysis.matchedRequirements.length > 0 && (
+                        <div>
+                          <p className="text-green-400 text-sm font-medium mb-2">
+                            ✅ Exigences satisfaites ({result.requirementsAnalysis.matchedRequirements.length}/{result.requirementsAnalysis.totalRequirements})
+                          </p>
+                          <ul className="text-white/80 text-sm space-y-1">
+                            {result.requirementsAnalysis.matchedRequirements.map((req, index) => (
+                              <li key={index} className="flex items-start gap-2">
+                                <CheckCircle className="w-3 h-3 text-green-400 mt-1 flex-shrink-0" />
+                                {req}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Exigences manquantes */}
+                      {result.requirementsAnalysis.missingRequirements && result.requirementsAnalysis.missingRequirements.length > 0 && (
+                        <div>
+                          <p className="text-red-400 text-sm font-medium mb-2">
+                            ❌ Exigences à développer ({result.requirementsAnalysis.missingRequirements.length})
+                          </p>
+                          <ul className="text-white/80 text-sm space-y-1">
+                            {result.requirementsAnalysis.missingRequirements.map((req, index) => (
+                              <li key={index} className="flex items-start gap-2">
+                                <XCircle className="w-3 h-3 text-red-400 mt-1 flex-shrink-0" />
+                                {req}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Score d'adéquation */}
+                      <div className="pt-2 border-t border-white/10">
+                        <div className="flex items-center justify-between">
+                          <span className="text-white/80 text-sm">Score d'adéquation:</span>
+                          <span className="text-purple-400 font-medium">{result.requirementsAnalysis.score}%</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Compétences */}
+                {(!result.competences || result.competences.length === 0) ? (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Compétences identifiées</h3>
+                    <p className="text-white/60 text-sm">Aucune compétence spécifique détectée dans le CV</p>
+                  </div>
+                ) : (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Compétences identifiées</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {result.competences.map((competence, index) => (
+                        <span
+                          key={index}
+                          className="bg-purple-500/20 text-purple-200 px-3 py-1 rounded-full text-xs"
+                        >
+                          {competence}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Points forts */}
+                {(!result.pointsForts || result.pointsForts.length === 0) ? (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Points forts</h3>
+                    <p className="text-white/60 text-sm">En cours d'analyse...</p>
+                  </div>
+                ) : (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Points forts</h3>
+                    <ul className="text-white/80 text-sm space-y-1">
+                      {result.pointsForts.map((point, index) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <CheckCircle className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                          {point}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Lacunes */}
+                {(!result.lacunes || result.lacunes.length === 0) ? (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Lacunes identifiées</h3>
+                    <p className="text-white/60 text-sm">Aucune lacune critique identifiée</p>
+                  </div>
+                ) : (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Lacunes identifiées</h3>
+                    <ul className="text-white/80 text-sm space-y-1">
+                      {result.lacunes.map((lacune, index) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <XCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                          {lacune}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Questions d'entretien */}
+                {(!result.questionsEntretien || result.questionsEntretien.length === 0) ? (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Questions d'entretien suggérées</h3>
+                    <p className="text-white/60 text-sm">Questions générales en préparation...</p>
+                  </div>
+                ) : (
+                  <div className="bg-white/5 rounded-xl p-4">
+                    <h3 className="text-white font-medium mb-2">Questions d'entretien suggérées</h3>
+                    <ul className="text-white/80 text-sm space-y-2">
+                      {result.questionsEntretien.map((question, index) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <span className="bg-purple-500/20 text-purple-200 px-2 py-1 rounded text-xs mt-0.5">
+                            {index + 1}
+                          </span>
+                          {question}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Métadonnées */}
+                <div className="bg-white/5 rounded-xl p-4">
+                  <h3 className="text-white font-medium mb-2">Informations fichier</h3>
+                  <div className="text-white/60 text-sm space-y-1">
+                    <p>Nom: {result.metadata?.fileName || 'N/A'}</p>
+                    <p>Taille: {result.metadata?.fileSize ? (result.metadata.fileSize / 1024).toFixed(1) + ' KB' : 'N/A'}</p>
+                    <p>Type: {result.metadata?.fileExtension || 'N/A'}</p>
+                    <p>Confiance: {result.niveauConfiance || 'N/A'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Historique des analyses */}
+            {savedAnalyses.length > 0 && (
+              <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
+                <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                  <FileText className="w-6 h-6" />
+                  Historique des analyses
+                </h2>
+                <div className="space-y-4">
+                  {savedAnalyses.map((analysis, index) => (
+                    <div key={analysis.id || index} className="bg-white/5 rounded-xl p-4 border border-white/10">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getRecommendationColor(analysis.recommandation)}`}>
+                            {analysis.recommandation}
+                          </span>
+                          <span className="text-white/60 text-sm">
+                            Score: {analysis.score}/100
+                          </span>
+                        </div>
+                        <span className="text-white/40 text-xs">
+                          {new Date(analysis.createdAt).toLocaleDateString('fr-FR')}
+                        </span>
+                      </div>
+                      {analysis.competences && analysis.competences.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-white/80 text-sm font-medium mb-1">Compétences détectées:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {analysis.competences.slice(0, 5).map((skill: string, idx: number) => (
+                              <span key={idx} className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs">
+                                {skill}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

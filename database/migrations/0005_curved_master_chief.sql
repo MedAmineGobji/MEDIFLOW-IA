@@ -1,0 +1,1 @@
+ALTER TABLE "interviews" ADD COLUMN "candidate_response" text DEFAULT 'pending';

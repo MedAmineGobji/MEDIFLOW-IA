@@ -1,0 +1,38 @@
+{
+  "name": "mediflow-ai-backend",
+  "version": "1.0.0",
+  "description": "Backend API for MediFlow AI CRM",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "build": "echo 'No build step required'",
+    "test": "jest"
+  },
+  "keywords": [
+    "crm",
+    "medical",
+    "clinic",
+    "api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "drizzle-orm": "^0.29.1",
+    "express": "^4.18.2",
+    "groq-sdk": "^0.37.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "pdf-parse": "^2.4.5",
+    "postgres": "^3.4.3"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2"
+  }
+}
